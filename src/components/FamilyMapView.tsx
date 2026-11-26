@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AdvancedMarker,
   InfoWindow,
@@ -27,6 +27,12 @@ import {
   TripRoom,
 } from '../types/trip';
 import { updateTravelerLocation } from '../services/tripService';
+import {
+  formatKoreanMonthDay,
+  getDateForDayIndex,
+  getTripPeriodStatus,
+} from '../utils/tripDates';
+import { CityWeatherWidget } from './CityWeatherWidget';
 
 interface FamilyMapViewProps {
   trip: TripRoom;
@@ -251,8 +257,15 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
   onOpenItineraryTab,
   onOpenQuickDiary,
 }) => {
-  const defaultTravelerId = activeProfileSlot !== 'brother_home' ? activeProfileSlot : 'me';
+  const defaultTravelerId = activeProfileSlot !== 'other_family' ? activeProfileSlot : 'me';
+  const period = useMemo(
+    () => getTripPeriodStatus(trip.startDate, trip.endDate),
+    [trip.startDate, trip.endDate]
+  );
+  const isGpsAllowed = period.isGpsAllowed;
+  const activeDayDefault = period.currentDayIndex ?? 1;
 
+  const [selectedMapDay, setSelectedMapDay] = useState<number>(activeDayDefault);
   const [activeTravelerId, setActiveTravelerId] = useState<string>(defaultTravelerId);
   const [statusInput, setStatusInput] = useState('');
   const [placeInput, setPlaceInput] = useState('');
@@ -272,7 +285,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
   const watchIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (activeProfileSlot !== 'brother_home') {
+    if (activeProfileSlot !== 'other_family') {
       setActiveTravelerId(activeProfileSlot);
     }
   }, [activeProfileSlot]);
@@ -292,16 +305,28 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
 
     const target = travelers.find((t) => t.id === activeTravelerId);
     if (target && canEdit) {
-      await updateTravelerLocation(trip.inviteCode, target.id, {
-        lat: target.lat,
-        lng: target.lng,
-        accuracyMeters: target.accuracyMeters,
-        currentPlaceLabel: target.currentPlaceLabel,
-        statusNote: target.statusNote,
-        isSharingLocation: false,
-      });
+      await updateTravelerLocation(
+        trip.inviteCode,
+        target.id,
+        {
+          lat: target.lat,
+          lng: target.lng,
+          accuracyMeters: target.accuracyMeters,
+          currentPlaceLabel: target.currentPlaceLabel,
+          statusNote: target.statusNote,
+          isSharingLocation: false,
+        },
+        { startDate: trip.startDate, endDate: trip.endDate }
+      );
     }
-  }, [activeTravelerId, canEdit, travelers, trip.inviteCode]);
+  }, [activeTravelerId, canEdit, travelers, trip.inviteCode, trip.startDate, trip.endDate]);
+
+  // Automatically stop GPS tracking whenever outside 2027-01-14 ~ 2027-01-28
+  useEffect(() => {
+    if (!isGpsAllowed && isTrackingGps) {
+      void stopGpsTracking();
+    }
+  }, [isGpsAllowed, isTrackingGps, stopGpsTracking]);
 
   useEffect(() => {
     return () => {
@@ -318,6 +343,13 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
       return;
     }
 
+    if (!isGpsAllowed) {
+      setGpsError(
+        `실시간 GPS 위치 켜기는 여행 일정 기간(${trip.startDate} ~ ${trip.endDate}) 동안만 사용할 수 있습니다.`
+      );
+      return;
+    }
+
     if (!('geolocation' in navigator)) {
       setGpsError('이 기기에서는 GPS 위치 기능을 지원하지 않습니다.');
       return;
@@ -326,26 +358,36 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
     setIsTrackingGps(true);
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
+        const currentStatus = getTripPeriodStatus(trip.startDate, trip.endDate);
+        if (!currentStatus.isGpsAllowed) {
+          void stopGpsTracking();
+          return;
+        }
         const current = travelers.find((t) => t.id === activeTravelerId);
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         const acc = pos.coords.accuracy || 20;
 
         setCameraTarget({ lat, lng, zoom: 15 });
-        void updateTravelerLocation(trip.inviteCode, activeTravelerId, {
-          lat,
-          lng,
-          accuracyMeters: acc,
-          currentPlaceLabel: placeInput.trim() || current?.currentPlaceLabel || '실시간 GPS 위치',
-          statusNote: statusInput.trim() || current?.statusNote || '이동 중',
-          isSharingLocation: true,
-        });
+        void updateTravelerLocation(
+          trip.inviteCode,
+          activeTravelerId,
+          {
+            lat,
+            lng,
+            accuracyMeters: acc,
+            currentPlaceLabel: placeInput.trim() || current?.currentPlaceLabel || '실시간 GPS 위치',
+            statusNote: statusInput.trim() || current?.statusNote || '이동 중',
+            isSharingLocation: true,
+          },
+          { startDate: trip.startDate, endDate: trip.endDate }
+        );
       },
       (err) => {
         setGpsError(
           err.code === 1
             ? '위치 권한이 거부되었습니다. 브라우저 설정에서 위치 권한을 허용해 주세요.'
-            : '현재 GPS 신호를 가져올 수 없습니다. 아래 체크인 버튼으로 위치를 직접 표시할 수 있습니다.'
+            : '현재 GPS 신호를 가져올 수 없습니다. 아래 상태 업데이트 버튼으로 메모를 남길 수 있습니다.'
         );
         setIsTrackingGps(false);
       },
@@ -358,19 +400,38 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
     setGpsError(null);
     const current = travelers.find((t) => t.id === activeTravelerId);
     setCameraTarget({ lat, lng, zoom: 15 });
-    await updateTravelerLocation(trip.inviteCode, activeTravelerId, {
-      lat,
-      lng,
-      accuracyMeters: 15,
-      currentPlaceLabel: label,
-      statusNote: statusInput.trim() || current?.statusNote || '방금 체크인',
-      isSharingLocation: true,
-    });
+    await updateTravelerLocation(
+      trip.inviteCode,
+      activeTravelerId,
+      {
+        lat,
+        lng,
+        accuracyMeters: 15,
+        currentPlaceLabel: label,
+        statusNote: statusInput.trim() || current?.statusNote || '일정 확인 중',
+        isSharingLocation: isGpsAllowed,
+      },
+      { startDate: trip.startDate, endDate: trip.endDate }
+    );
   };
 
-  const todayItems = itinerary.filter((item) => item.dayIndex === 1);
-  const tomorrowItems = itinerary.filter((item) => item.dayIndex === 2);
-  const todayDiaries = diaryEntries.filter((d) => d.dayIndex === 1);
+  const dayOptions = useMemo(() => {
+    const nums = Array.from(new Set(itinerary.map((i) => i.dayIndex))).sort((a, b) => a - b);
+    return nums.length > 0 ? nums : [1];
+  }, [itinerary]);
+
+  const mapDayItems = useMemo(
+    () => itinerary.filter((item) => item.dayIndex === selectedMapDay),
+    [itinerary, selectedMapDay]
+  );
+
+  const primaryBriefDay = period.currentDayIndex ?? 1;
+  const secondaryBriefDay = primaryBriefDay < 15 ? primaryBriefDay + 1 : primaryBriefDay;
+  const primaryItems = itinerary.filter((item) => item.dayIndex === primaryBriefDay);
+  const secondaryItems =
+    secondaryBriefDay !== primaryBriefDay
+      ? itinerary.filter((item) => item.dayIndex === secondaryBriefDay)
+      : [];
   const latestDiary = diaryEntries[0];
 
   const defaultCenter =
@@ -378,8 +439,22 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
       ? { lat: travelers[0].lat, lng: travelers[0].lng }
       : { lat: 48.8584, lng: 2.2945 };
 
+  const activeCitySpot = mapDayItems[0] || primaryItems[0];
+  const weatherCity = activeCitySpot?.city || '파리';
+  const weatherAddress = activeCitySpot?.address;
+  const weatherLat = activeCitySpot?.lat ?? defaultCenter.lat;
+  const weatherLng = activeCitySpot?.lng ?? defaultCenter.lng;
+
   return (
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-24 md:pb-8">
+      <CityWeatherWidget
+        city={weatherCity}
+        address={weatherAddress}
+        lat={weatherLat}
+        lng={weatherLng}
+        dayIndex={selectedMapDay}
+      />
+
       <div className="grid lg:grid-cols-12 gap-6 items-stretch">
         {/* Main Interactive Google Map (8 columns on desktop) */}
         <div className="lg:col-span-8 flex flex-col gap-4">
@@ -388,12 +463,36 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
             <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold text-slate-900">가족 실시간 위치 지도</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  실시간 공유 {travelers.filter((t) => t.isSharingLocation).length}명 / 전체{' '}
-                  {travelers.length}명 · 핀을 눌러 상세 위치 확인
+                <p className="text-xs text-slate-500 mt-0.5 font-mono-tabular">
+                  {period.status === 'before'
+                    ? `출발까지 D-${period.daysUntilStart} · 2027.01.14~01.28 여행 기간에 GPS 실시간 공유가 열립니다`
+                    : period.status === 'during'
+                    ? `여행 ${period.currentDayIndex}일차 · 실시간 공유 ${
+                        travelers.filter((t) => t.isSharingLocation).length
+                      }명 / 전체 ${travelers.length}명`
+                    : '2027.01.14~01.28 유럽 여행 일정 종료 · 지도에서 기록 확인'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <select
+                  aria-label="지도에 표시할 일차 선택"
+                  value={selectedMapDay}
+                  onChange={(e) => {
+                    const nextDay = Number(e.target.value);
+                    setSelectedMapDay(nextDay);
+                    const firstSpot = itinerary.find((i) => i.dayIndex === nextDay);
+                    if (firstSpot) {
+                      setCameraTarget({ lat: firstSpot.lat, lng: firstSpot.lng, zoom: 13 });
+                    }
+                  }}
+                  className="min-h-[40px] px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 bg-white text-slate-800"
+                >
+                  {dayOptions.map((d) => (
+                    <option key={d} value={d}>
+                      {d}일차 ({formatKoreanMonthDay(getDateForDayIndex(trip.startDate, d))})
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   onClick={() => setShowRouteLine((prev) => !prev)}
@@ -404,7 +503,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                   }`}
                 >
                   <RouteIcon className="w-3.5 h-3.5" />
-                  1일차 동선
+                  {selectedMapDay}일차 동선
                 </button>
                 <button
                   type="button"
@@ -439,7 +538,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                   }}
                 >
                   <MapCameraController target={cameraTarget} />
-                  <DayRouteOverlay items={todayItems} enabled={showRouteLine} />
+                  <DayRouteOverlay items={mapDayItems} enabled={showRouteLine} />
 
                   {travelers.map((t) => (
                     <TravelerMarker
@@ -454,7 +553,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                     />
                   ))}
 
-                  {todayItems.map((item, idx) => (
+                  {mapDayItems.map((item, idx) => (
                     <SpotMarker
                       key={item.id}
                       item={item}
@@ -479,7 +578,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                         <div className="font-bold text-sm">{selectedTraveler.name}</div>
                         <div className="text-xs text-slate-500 mt-0.5">
                           {selectedTraveler.relation} ·{' '}
-                          {selectedTraveler.isSharingLocation ? '실시간 공유 중' : '마지막 체크인'}
+                          {selectedTraveler.isSharingLocation ? '실시간 공유 중' : '체크인 대기'}
                         </div>
                         <div className="text-xs font-medium text-slate-800 mt-2">
                           현재 위치: {selectedTraveler.currentPlaceLabel}
@@ -506,7 +605,8 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                     >
                       <div className="p-1 min-w-[200px] text-slate-900">
                         <div className="text-xs text-blue-700 font-semibold">
-                          {selectedSpot.dayIndex}일차 · {selectedSpot.startTime}
+                          {selectedSpot.dayIndex}일차 ({formatKoreanMonthDay(selectedSpot.date)}) ·{' '}
+                          {selectedSpot.startTime}
                         </div>
                         <div className="font-bold text-sm mt-0.5">{selectedSpot.title}</div>
                         <div className="text-xs text-slate-600 mt-1">{selectedSpot.address}</div>
@@ -539,7 +639,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                     Google Maps API 키를 불러오는 중입니다
                   </p>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                    아래 가족별 실시간 위치 목록에서 각 구성원의 현재 위치와 상태를 바로 확인할 수 있습니다.
+                    아래 가족별 위치 목록에서 각 구성원의 위치와 상태를 바로 확인할 수 있습니다.
                   </p>
                 </div>
               )}
@@ -548,7 +648,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
 
           {/* Live Family Location Cards & GPS Check-in Bar */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">
                   6명 가족 현재 위치 (누르면 지도 이동)
@@ -561,8 +661,11 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                 <button
                   type="button"
                   onClick={handleToggleLiveGps}
+                  disabled={!isGpsAllowed && !isTrackingGps}
                   className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 whitespace-nowrap ${
-                    isTrackingGps
+                    !isGpsAllowed && !isTrackingGps
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      : isTrackingGps
                       ? 'bg-red-600 text-white hover:bg-red-700'
                       : 'bg-blue-700 text-white hover:bg-blue-800'
                   }`}
@@ -575,12 +678,20 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                   ) : (
                     <>
                       <Radio className="w-4 h-4" />
-                      내 실시간 GPS 위치 켜기
+                      {isGpsAllowed
+                        ? '내 실시간 GPS 위치 켜기'
+                        : 'GPS 켜기 (2027.01.14~01.28만 가능)'}
                     </>
                   )}
                 </button>
               )}
             </div>
+
+            {!isGpsAllowed && (
+              <div className="mb-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
+                여행 일정 기간(<strong>2027년 1월 14일 ~ 1월 28일</strong>) 동안만 실시간 GPS 위치 공유를 켤 수 있습니다. 출발 전에는 가족별 예정 위치와 동선을 미리 확인하세요.
+              </div>
+            )}
 
             {gpsError && (
               <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
@@ -623,7 +734,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                         {t.currentPlaceLabel}
                       </div>
                       <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                        {t.isSharingLocation ? '실시간 GPS' : '체크인'} · {t.statusNote}
+                        {t.isSharingLocation ? '실시간 GPS' : '대기'} · {t.statusNote}
                       </div>
                     </div>
                   </button>
@@ -639,7 +750,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                   value={placeInput}
                   onChange={(e) => setPlaceInput(e.target.value)}
                   maxLength={100}
-                  placeholder="현재 장소 이름 (예: 에펠탑 매표소 앞)"
+                  placeholder="장소 이름 (예: 에펠탑 매표소 앞)"
                   className="flex-1 px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600/20 min-h-[44px]"
                 />
                 <input
@@ -647,14 +758,14 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                   value={statusInput}
                   onChange={(e) => setStatusInput(e.target.value)}
                   maxLength={80}
-                  placeholder="상태 메모 (예: 젤라또 먹는 중)"
+                  placeholder="상태 메모 (예: 짐 챙기는 중)"
                   className="flex-1 px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600/20 min-h-[44px]"
                 />
                 <button
                   type="button"
                   onClick={() => {
                     const target = travelers.find((t) => t.id === activeTravelerId);
-                    const spot = todayItems[0];
+                    const spot = mapDayItems[0];
                     const lat = target?.lat ?? spot?.lat ?? 48.8584;
                     const lng = target?.lng ?? spot?.lng ?? 2.2945;
                     const label =
@@ -677,7 +788,7 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
             <div className="flex items-center justify-between gap-2 mb-3">
               <div className="flex items-center gap-2">
                 <Utensils className="w-4 h-4 text-amber-700" />
-                <h3 className="text-sm font-bold text-slate-900">오늘 뭘 먹고 뭘 했는지</h3>
+                <h3 className="text-sm font-bold text-slate-900">최근 사진 일기</h3>
               </div>
               <button
                 type="button"
@@ -705,8 +816,9 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                   )}
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">
-                    최신 기록 · {latestDiary.dayIndex}일차 · {latestDiary.timeLabel} · {latestDiary.city}
+                  <div className="text-xs text-slate-500 font-mono-tabular">
+                    최신 기록 · {latestDiary.dayIndex}일차 ({formatKoreanMonthDay(latestDiary.date)}) ·{' '}
+                    {latestDiary.timeLabel} · {latestDiary.city}
                   </div>
                   <h4 className="text-sm font-bold text-slate-900 mt-1">
                     {latestDiary.mealOrActivity}
@@ -715,11 +827,6 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                     {latestDiary.story}
                   </p>
                 </div>
-                {todayDiaries.length > 1 && (
-                  <div className="pt-2 border-t border-slate-100 text-xs text-slate-500">
-                    오늘 남긴 사진 기록 {todayDiaries.length}건
-                  </div>
-                )}
               </div>
             ) : (
               <div className="py-6 text-center">
@@ -743,30 +850,35 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
             <div className="flex items-center justify-between gap-2 mb-3">
               <div className="flex items-center gap-2">
                 <CalendarDays className="w-4 h-4 text-blue-700" />
-                <h3 className="text-sm font-bold text-slate-900">오늘 & 내일 일정</h3>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {period.status === 'during' ? '오늘 & 내일 일정' : '1일차 & 2일차 일정 미리보기'}
+                </h3>
               </div>
               <button
                 type="button"
                 onClick={onOpenItineraryTab}
                 className="text-xs font-semibold text-blue-700 hover:underline whitespace-nowrap min-h-[36px] px-1"
               >
-                전체 일정 편집
+                전체 15일 일정
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <div className="text-xs font-semibold text-slate-500 mb-2">
-                  오늘 (1일차 · {todayItems[0]?.city || '파리'})
+                <div className="text-xs font-semibold text-slate-500 mb-2 font-mono-tabular">
+                  {period.status === 'during' ? '오늘 · ' : ''}
+                  {primaryBriefDay}일차 ({formatKoreanMonthDay(getDateForDayIndex(trip.startDate, primaryBriefDay))} ·{' '}
+                  {primaryItems[0]?.city || '파리'})
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {todayItems.map((item) => (
+                  {primaryItems.map((item) => (
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() =>
-                        setCameraTarget({ lat: item.lat, lng: item.lng, zoom: 15 })
-                      }
+                      onClick={() => {
+                        setSelectedMapDay(item.dayIndex);
+                        setCameraTarget({ lat: item.lat, lng: item.lng, zoom: 15 });
+                      }}
                       className="w-full text-left py-2.5 flex items-start gap-2.5 hover:bg-slate-50 rounded-lg px-1.5 transition-colors"
                     >
                       <CheckCircle2
@@ -788,13 +900,15 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100">
-                <div className="text-xs font-semibold text-blue-700 mb-2">
-                  내일 (2일차 · {tomorrowItems[0]?.city || '파리'})
-                </div>
-                {tomorrowItems.length > 0 ? (
+              {secondaryItems.length > 0 && (
+                <div className="pt-3 border-t border-slate-100">
+                  <div className="text-xs font-semibold text-blue-700 mb-2 font-mono-tabular">
+                    {period.status === 'during' ? '내일 · ' : ''}
+                    {secondaryBriefDay}일차 ({formatKoreanMonthDay(getDateForDayIndex(trip.startDate, secondaryBriefDay))} ·{' '}
+                    {secondaryItems[0]?.city || '파리'})
+                  </div>
                   <div className="divide-y divide-slate-100">
-                    {tomorrowItems.map((item) => (
+                    {secondaryItems.map((item) => (
                       <div key={item.id} className="py-2 flex items-start gap-2.5 px-1.5">
                         <span className="text-[11px] font-mono-tabular font-semibold text-slate-500 mt-0.5 shrink-0">
                           {item.startTime}
@@ -810,10 +924,8 @@ export const FamilyMapView: React.FC<FamilyMapViewProps> = ({
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-400">내일 등록된 일정이 없습니다.</p>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </aside>

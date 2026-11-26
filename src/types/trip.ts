@@ -7,7 +7,7 @@ export type ProfileSlot =
   | 'aunt_1'
   | 'aunt_2'
   | 'niece_g5'
-  | 'brother_home';
+  | 'other_family';
 
 export type MemberRole = 'owner' | 'editor' | 'viewer';
 export type AgeGroup = 'kid' | 'adult' | 'senior';
@@ -34,7 +34,7 @@ export type ItineraryStatus = 'planned' | 'visited' | 'skipped';
 export type DiaryEntryType = 'meal' | 'spot' | 'moment';
 
 export interface GuestSession {
-  inviteCode: string;
+  tripId: string;
   displayName: string;
   profileSlot: ProfileSlot;
 }
@@ -146,7 +146,7 @@ export const RECOMMENDATION_TAGS: RecommendationTag[] = [
   { id: '어른감성', label: '#어른감성', group: 'audience', description: '미술관, 로컬 카페, 전망·야경 등 어른 선호' },
   { id: '걷기편한', label: '#걷기편한', group: 'comfort', description: '평지 위주 또는 이동 부담이 적은 코스' },
   { id: '잠시휴식', label: '#잠시휴식', group: 'comfort', description: '화장실·벤치·카페가 가까워 쉬기 좋은 곳' },
-  { id: '실내코스', label: '#실내코스', group: 'comfort', description: '비 오거나 더울 때 쾌적한 실내 공간' },
+  { id: '실내코스', label: '#실내코스', group: 'comfort', description: '겨울 추위나 비를 피해 쾌적한 실내 공간' },
   { id: '체험액티비티', label: '#체험액티비티', group: 'theme', description: '유람선, 케이블카, 산악열차 등 탈거리·체험' },
   { id: '포토스팟', label: '#포토스팟', group: 'theme', description: '가족 단체사진 남기기 좋은 명소' },
   { id: '디저트간식', label: '#디저트간식', group: 'theme', description: '젤라또, 크레페, 마카롱 등 간식 맛집' },
@@ -161,11 +161,11 @@ export const PROFILE_SLOT_OPTIONS: {
 }[] = [
   { id: 'me', label: '나 (인솔자)', sublabel: '여행 일정 & 사진 기록' },
   { id: 'daughter_g6', label: '내 딸 (초6)', sublabel: '초등 6학년' },
-  { id: 'niece_g5', label: '조카 (초5)', sublabel: '형의 딸 · 초등 5학년' },
+  { id: 'niece_g5', label: '조카 (초5)', sublabel: '초등 5학년' },
   { id: 'mom', label: '엄마', sublabel: '어머님' },
   { id: 'aunt_1', label: '큰이모', sublabel: '이모 1' },
   { id: 'aunt_2', label: '작은이모', sublabel: '이모 2' },
-  { id: 'brother_home', label: '형 (한국에서 응원)', sublabel: '오늘/내일 일정 & 사진 확인' },
+  { id: 'other_family', label: '다른 가족', sublabel: '일정 & 사진 일기 함께 보기' },
 ];
 
 export const CATEGORY_LABELS: Record<ItineraryCategory, string> = {

@@ -29,8 +29,8 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function isValidInviteCode(code) {
-      return code is string && code.size() >= 6 && code.size() <= 12 && code.matches('^[A-Z0-9]+$');
+    function isValidRoomId(code) {
+      return code is string && code.size() >= 6 && code.size() <= 16 && code.matches('^[A-Z0-9]+$');
     }
 
     function isValidDateStr(d) {
@@ -45,10 +45,14 @@ service cloud.firestore {
       return arr is list && arr.size() <= maxLen && (arr.size() == 0 || arr[0] is string);
     }
 
-    function isRoomOwner(inviteCode) {
+    function isSharedFamilyRoom(roomId) {
+      return roomId == 'EUROPE202701';
+    }
+
+    function isRoomOwner(roomId) {
       return isVerified()
-        && exists(/databases/$(database)/documents/tripRooms/$(inviteCode))
-        && get(/databases/$(database)/documents/tripRooms/$(inviteCode)).data.ownerId == request.auth.uid;
+        && exists(/databases/$(database)/documents/tripRooms/$(roomId))
+        && get(/databases/$(database)/documents/tripRooms/$(roomId)).data.ownerId == request.auth.uid;
     }
 
     // --- Validation Blueprints ---
@@ -60,7 +64,7 @@ service cloud.firestore {
           'inviteCode', 'title', 'subtitle', 'startDate', 'endDate', 'ownerId', 'createdAt', 'updatedAt'
         ])
         && data.inviteCode == code
-        && isValidInviteCode(data.inviteCode)
+        && isValidRoomId(data.inviteCode)
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
         && data.subtitle is string && data.subtitle.size() <= 160
         && isValidDateStr(data.startDate)
@@ -74,7 +78,7 @@ service cloud.firestore {
       return data.keys().hasAll(['inviteCode', 'tripTitle', 'role', 'joinedAt'])
         && data.keys().hasOnly(['inviteCode', 'tripTitle', 'role', 'joinedAt'])
         && data.inviteCode == code
-        && isValidInviteCode(data.inviteCode)
+        && isValidRoomId(data.inviteCode)
         && data.tripTitle is string && data.tripTitle.size() >= 1 && data.tripTitle.size() <= 100
         && data.role in ['owner', 'editor', 'viewer']
         && data.joinedAt is timestamp;
@@ -198,29 +202,32 @@ service cloud.firestore {
 
     // 1. User's private saved trip rooms
     match /users/{userId}/joinedTrips/{inviteCode} {
-      allow get: if isSignedIn() && isValidId(userId) && isValidInviteCode(inviteCode) && request.auth.uid == userId;
+      allow get: if isSignedIn() && isValidId(userId) && isValidRoomId(inviteCode) && request.auth.uid == userId;
       allow list: if isSignedIn() && request.auth.uid == userId;
-      allow create: if isVerified() && isValidId(userId) && isValidInviteCode(inviteCode)
+      allow create: if isVerified() && isValidId(userId) && isValidRoomId(inviteCode)
         && request.auth.uid == userId
         && isValidJoinedTrip(incoming(), inviteCode)
         && incoming().joinedAt == request.time;
-      allow update: if isVerified() && isValidId(userId) && isValidInviteCode(inviteCode)
+      allow update: if isVerified() && isValidId(userId) && isValidRoomId(inviteCode)
         && request.auth.uid == userId
         && isValidJoinedTrip(incoming(), inviteCode)
         && incoming().diff(existing()).affectedKeys().hasOnly(['tripTitle', 'role']);
-      allow delete: if isVerified() && isValidId(userId) && isValidInviteCode(inviteCode) && request.auth.uid == userId;
+      allow delete: if isVerified() && isValidId(userId) && isValidRoomId(inviteCode) && request.auth.uid == userId;
     }
 
-    // 2. Invite-code-keyed Family Trip Rooms (No list allowed; exact inviteCode required in path)
+    // 2. Shared Family Trip Room (Fixed room EUROPE202701 accessible without login or invite code)
     match /tripRooms/{inviteCode} {
-      allow get: if isValidInviteCode(inviteCode);
+      allow get: if isValidRoomId(inviteCode);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
-      allow create: if isVerified() && isValidInviteCode(inviteCode)
+      allow create: if isValidRoomId(inviteCode)
         && isValidTripRoom(incoming(), inviteCode)
-        && incoming().ownerId == request.auth.uid
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
-      allow update: if isVerified() && isValidInviteCode(inviteCode)
+        && incoming().updatedAt == request.time
+        && (
+          (isSharedFamilyRoom(inviteCode) && incoming().ownerId == 'family_shared')
+          || (isVerified() && incoming().ownerId == request.auth.uid)
+        );
+      allow update: if isVerified() && isValidRoomId(inviteCode)
         && existing().ownerId == request.auth.uid
         && isValidTripRoom(incoming(), inviteCode)
         && incoming().ownerId == existing().ownerId
@@ -228,16 +235,16 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'subtitle', 'startDate', 'endDate', 'updatedAt']);
-      allow delete: if isVerified() && isValidInviteCode(inviteCode) && existing().ownerId == request.auth.uid;
+      allow delete: if isVerified() && isValidRoomId(inviteCode) && existing().ownerId == request.auth.uid;
 
-      // 3. Six Travelers & Real-Time Location (Accessible & updatable by invite-code holders)
+      // 3. Six Travelers & Real-Time Location
       match /travelers/{travelerId} {
-        allow get: if isValidInviteCode(inviteCode) && isValidId(travelerId);
-        allow list: if isValidInviteCode(inviteCode);
-        allow create: if isValidInviteCode(inviteCode) && isValidId(travelerId)
+        allow get: if isValidRoomId(inviteCode) && isValidId(travelerId);
+        allow list: if isValidRoomId(inviteCode);
+        allow create: if isValidRoomId(inviteCode) && isValidId(travelerId)
           && isValidTraveler(incoming(), travelerId)
           && incoming().updatedAt == request.time;
-        allow update: if isValidInviteCode(inviteCode) && isValidId(travelerId)
+        allow update: if isValidRoomId(inviteCode) && isValidId(travelerId)
           && isValidTraveler(incoming(), travelerId)
           && incoming().id == existing().id
           && incoming().updatedAt == request.time
@@ -249,13 +256,13 @@ service cloud.firestore {
 
       // 4. Shared Itinerary Items
       match /itineraryItems/{itemId} {
-        allow get: if isValidInviteCode(inviteCode) && isValidId(itemId);
-        allow list: if isValidInviteCode(inviteCode);
-        allow create: if isValidInviteCode(inviteCode) && isValidId(itemId)
+        allow get: if isValidRoomId(inviteCode) && isValidId(itemId);
+        allow list: if isValidRoomId(inviteCode);
+        allow create: if isValidRoomId(inviteCode) && isValidId(itemId)
           && isValidItineraryItem(incoming(), itemId)
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
-        allow update: if isValidInviteCode(inviteCode) && isValidId(itemId)
+        allow update: if isValidRoomId(inviteCode) && isValidId(itemId)
           && isValidItineraryItem(incoming(), itemId)
           && incoming().id == existing().id
           && incoming().createdAt == existing().createdAt
@@ -265,18 +272,18 @@ service cloud.firestore {
             'category', 'placeId', 'address', 'lat', 'lng', 'tags', 'walkingLevel',
             'memo', 'status', 'likedBy', 'updatedByName', 'updatedAt'
           ]);
-        allow delete: if isRoomOwner(inviteCode) && isValidId(itemId);
+        allow delete: if (isSharedFamilyRoom(inviteCode) || isRoomOwner(inviteCode)) && isValidId(itemId);
       }
 
       // 5. Photo Travel Diary Entries
       match /diaryEntries/{entryId} {
-        allow get: if isValidInviteCode(inviteCode) && isValidId(entryId);
-        allow list: if isValidInviteCode(inviteCode);
-        allow create: if isValidInviteCode(inviteCode) && isValidId(entryId)
+        allow get: if isValidRoomId(inviteCode) && isValidId(entryId);
+        allow list: if isValidRoomId(inviteCode);
+        allow create: if isValidRoomId(inviteCode) && isValidId(entryId)
           && isValidDiaryEntry(incoming(), entryId)
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
-        allow update: if isValidInviteCode(inviteCode) && isValidId(entryId)
+        allow update: if isValidRoomId(inviteCode) && isValidId(entryId)
           && isValidDiaryEntry(incoming(), entryId)
           && incoming().id == existing().id
           && incoming().createdAt == existing().createdAt
@@ -286,18 +293,18 @@ service cloud.firestore {
             'mealOrActivity', 'entryType', 'story', 'photoUrl', 'lat', 'lng',
             'withTravelers', 'tags', 'updatedAt'
           ]);
-        allow delete: if isRoomOwner(inviteCode) && isValidId(entryId);
+        allow delete: if (isSharedFamilyRoom(inviteCode) || isRoomOwner(inviteCode)) && isValidId(entryId);
       }
 
       // 6. Wishlist Places & Family Votes
       match /wishlistPlaces/{placeId} {
-        allow get: if isValidInviteCode(inviteCode) && isValidId(placeId);
-        allow list: if isValidInviteCode(inviteCode);
-        allow create: if isValidInviteCode(inviteCode) && isValidId(placeId)
+        allow get: if isValidRoomId(inviteCode) && isValidId(placeId);
+        allow list: if isValidRoomId(inviteCode);
+        allow create: if isValidRoomId(inviteCode) && isValidId(placeId)
           && isValidWishlistPlace(incoming(), placeId)
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
-        allow update: if isValidInviteCode(inviteCode) && isValidId(placeId)
+        allow update: if isValidRoomId(inviteCode) && isValidId(placeId)
           && isValidWishlistPlace(incoming(), placeId)
           && incoming().id == existing().id
           && incoming().createdAt == existing().createdAt
@@ -306,7 +313,7 @@ service cloud.firestore {
             'city', 'placeName', 'googlePlaceId', 'address', 'lat', 'lng',
             'category', 'tags', 'reason', 'votedBy', 'updatedAt'
           ]);
-        allow delete: if isRoomOwner(inviteCode) && isValidId(placeId);
+        allow delete: if (isSharedFamilyRoom(inviteCode) || isRoomOwner(inviteCode)) && isValidId(placeId);
       }
     }
   }

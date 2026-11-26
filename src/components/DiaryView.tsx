@@ -20,6 +20,12 @@ import {
   TripRoom,
 } from '../types/trip';
 import { addDiaryEntry, deleteDiaryEntry } from '../services/tripService';
+import {
+  formatKoreanMonthDay,
+  getDateForDayIndex,
+  getTripPeriodStatus,
+  TRIP_TOTAL_DAYS,
+} from '../utils/tripDates';
 import { compressImageForDiary } from '../utils/imageCompress';
 import { PlaceAutocompleteInput } from './PlaceAutocompleteInput';
 
@@ -36,7 +42,6 @@ interface DiaryViewProps {
   trip: TripRoom;
   actorName: string;
   canEdit: boolean;
-  isOwner: boolean;
   travelers: Traveler[];
   itinerary: ItineraryItem[];
   diaryEntries: DiaryEntry[];
@@ -59,7 +64,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   trip,
   actorName,
   canEdit,
-  isOwner,
   travelers,
   itinerary,
   diaryEntries,
@@ -67,6 +71,11 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
   prefill,
   onFocusOnMap,
 }) => {
+  const period = useMemo(
+    () => getTripPeriodStatus(trip.startDate, trip.endDate),
+    [trip.startDate, trip.endDate]
+  );
+
   const [typeFilter, setTypeFilter] = useState<DiaryEntryType | 'all'>('all');
   const [dayFilter, setDayFilter] = useState<number | 'all'>('all');
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
@@ -107,6 +116,9 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
         setLat(prefill.lat);
         setLng(prefill.lng);
       } else {
+        const defaultDay = period.currentDayIndex ?? 1;
+        setDayIndex(defaultDay);
+        setDate(getDateForDayIndex(trip.startDate, defaultDay));
         const now = new Date();
         setTimeLabel(
           `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
@@ -114,7 +126,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
       }
       setIsModalOpen(true);
     }
-  }, [externalOpenNonce, prefill, canEdit]);
+  }, [externalOpenNonce, prefill, canEdit, period.currentDayIndex, trip.startDate]);
 
   // Always sort newest diary entry first (latest createdAt -> date -> dayIndex -> timeLabel)
   const filteredEntries = useMemo(() => {
@@ -133,9 +145,10 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
       });
   }, [diaryEntries, typeFilter, dayFilter]);
 
-  const tomorrowPlan = useMemo(
-    () => itinerary.filter((item) => item.dayIndex === 2),
-    [itinerary]
+  const previewDay = period.currentDayIndex ? Math.min(TRIP_TOTAL_DAYS, period.currentDayIndex + 1) : 1;
+  const previewPlan = useMemo(
+    () => itinerary.filter((item) => item.dayIndex === previewDay),
+    [itinerary, previewDay]
   );
 
   const dayNumbers = useMemo(() => {
@@ -177,9 +190,10 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
     if (!placeName.trim() || !mealOrActivity.trim() || !story.trim()) return;
     setIsSaving(true);
     try {
+      const syncedDate = getDateForDayIndex(trip.startDate, dayIndex);
       await addDiaryEntry(trip.inviteCode, actorName || '가족', {
         dayIndex,
-        date,
+        date: syncedDate,
         timeLabel,
         city,
         placeName,
@@ -209,11 +223,9 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 pb-5 border-b border-slate-200">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-            유럽 여행 사진 일기장
-          </h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">유럽 여행 사진 일기장</h1>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            가장 최근에 올린 일기가 맨 앞에 표시됩니다. 오늘 먹은 음식과 내일 일정을 가족 모두가 함께 봅니다.
+            가장 최근에 올린 일기가 맨 앞에 나옵니다. 무엇을 먹었는지, 어디를 다녀왔는지 가족 모두가 함께 봅니다.
           </p>
         </div>
         {canEdit && (
@@ -228,7 +240,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
         )}
       </div>
 
-      {/* Tomorrow Plan Banner for Family & Brother at Home */}
+      {/* Upcoming Schedule Banner */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 mb-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
@@ -236,16 +248,15 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-900">
-              내일(2일차) 우리가 갈 곳 미리보기
+              {period.currentDayIndex ? '내일' : '출발 첫날'} ({previewDay}일차 ·{' '}
+              {formatKoreanMonthDay(getDateForDayIndex(trip.startDate, previewDay))}) 일정 미리보기
             </h2>
-            {tomorrowPlan.length > 0 ? (
+            {previewPlan.length > 0 ? (
               <p className="text-xs sm:text-sm text-slate-600 mt-1">
-                {tomorrowPlan.map((p) => `${p.startTime} ${p.title}`).join('  ·  ')}
+                {previewPlan.map((p) => `${p.startTime} ${p.title}`).join('  ·  ')}
               </p>
             ) : (
-              <p className="text-xs text-slate-500 mt-1">
-                내일 일정이 아직 등록되지 않았습니다.
-              </p>
+              <p className="text-xs text-slate-500 mt-1">등록된 일정이 없습니다.</p>
             )}
           </div>
         </div>
@@ -297,13 +308,13 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
               key={d}
               type="button"
               onClick={() => setDayFilter(d)}
-              className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-semibold border whitespace-nowrap ${
+              className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-semibold border whitespace-nowrap font-mono-tabular ${
                 dayFilter === d
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-white text-slate-700 border-slate-200'
               }`}
             >
-              {d === 1 ? '1일차 (오늘)' : `${d}일차`}
+              {d}일차 ({formatKoreanMonthDay(getDateForDayIndex(trip.startDate, d))})
             </button>
           ))}
         </div>
@@ -341,7 +352,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                 key={entry.id}
                 className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col"
               >
-                {/* 4:3 Travel Photo with resilient fallback */}
                 <div className="aspect-[4/3] w-full bg-slate-100 relative overflow-hidden">
                   {entry.photoUrl && !brokenImages[entry.id] ? (
                     <img
@@ -361,14 +371,12 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                   )}
                 </div>
 
-                {/* Journal Content */}
                 <div className="p-5 flex-1 flex flex-col">
-                  {/* Unboxed quiet metadata */}
                   <div className="flex items-center justify-between gap-2 text-xs text-slate-500 font-mono-tabular mb-2">
                     <span>
                       {idx === 0 ? '최신 일기 · ' : ''}
-                      {entry.dayIndex === 1 ? '1일차 · 오늘' : `${entry.dayIndex}일차`} ·{' '}
-                      {entry.timeLabel} · {entry.city}
+                      {entry.dayIndex}일차 ({formatKoreanMonthDay(entry.date)}) · {entry.timeLabel}{' '}
+                      · {entry.city}
                     </span>
                     <span className="text-amber-700 font-sans font-semibold shrink-0">
                       {ENTRY_TYPE_LABELS[entry.entryType]}
@@ -408,7 +416,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                       지도에서 위치 보기
                     </button>
 
-                    {isOwner && (
+                    {canEdit && (
                       <button
                         type="button"
                         onClick={() => void deleteDiaryEntry(trip.inviteCode, entry.id)}
@@ -442,7 +450,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="p-5 space-y-4">
-              {/* Photo file upload */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   찍은 사진 올리기 (자동 최적화)
@@ -474,7 +481,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                           : '눌러서 음식이나 가족 사진을 선택하세요'}
                       </p>
                       <p className="text-[11px] text-slate-500 mt-1">
-                        형과 가족들이 바로 볼 수 있게 빠르게 저장됩니다.
+                        가족들이 바로 볼 수 있게 빠르게 저장됩니다.
                       </p>
                     </div>
                   )}
@@ -482,7 +489,6 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                 {uploadError && <p className="text-xs text-red-600 mt-1">{uploadError}</p>}
               </div>
 
-              {/* Entry Type */}
               <div className="grid grid-cols-3 gap-2">
                 {(Object.entries(ENTRY_TYPE_LABELS) as [DiaryEntryType, string][]).map(
                   ([k, label]) => (
@@ -502,14 +508,13 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                 )}
               </div>
 
-              {/* Quick pick from itinerary */}
               {itinerary.length > 0 && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                     일정표 장소에서 빠르게 선택
                   </label>
                   <div className="flex gap-1.5 overflow-x-auto pb-1">
-                    {itinerary.slice(0, 6).map((item) => (
+                    {itinerary.slice(0, 8).map((item) => (
                       <button
                         key={item.id}
                         type="button"
@@ -565,14 +570,21 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">일차</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={30}
+                  <select
                     value={dayIndex}
-                    onChange={(e) => setDayIndex(Number(e.target.value) || 1)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl min-h-[44px] font-mono-tabular"
-                  />
+                    onChange={(e) => {
+                      const next = Number(e.target.value) || 1;
+                      setDayIndex(next);
+                      setDate(getDateForDayIndex(trip.startDate, next));
+                    }}
+                    className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-xl min-h-[44px] bg-white font-mono-tabular"
+                  >
+                    {Array.from({ length: TRIP_TOTAL_DAYS }, (_, idx) => idx + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {d}일차 ({formatKoreanMonthDay(getDateForDayIndex(trip.startDate, d))})
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">시각</label>
@@ -647,7 +659,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  일기장 이야기 (형과 가족들이 읽는 오늘의 기록)
+                  일기장 이야기 (가족들이 함께 읽는 기록)
                 </label>
                 <textarea
                   value={story}
@@ -683,6 +695,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                   {isSaving ? '올리는 중...' : '일기장에 올리기'}
                 </button>
               </div>
+              <input type="hidden" value={date} />
             </form>
           </div>
         </div>

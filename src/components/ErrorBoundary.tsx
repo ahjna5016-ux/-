@@ -31,7 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       let friendlyMsg = '데이터를 불러오는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
       if (this.state.errorMessage.includes('Missing or insufficient permissions')) {
-        friendlyMsg = '가족 여행 접근 권한을 확인하는 중 문제가 발생했습니다. 다시 로그인하거나 초대 코드를 확인해 주세요.';
+        friendlyMsg = '가족 여행 데이터를 불러오는 중 접근 문제가 발생했습니다. 새로고침 후 다시 시도해 주세요.';
       } else if (this.state.errorMessage.includes('Quota exceeded')) {
         friendlyMsg = '데이터베이스 무료 사용량 한도에 도달했습니다. 내일 초기화됩니다.';
       }

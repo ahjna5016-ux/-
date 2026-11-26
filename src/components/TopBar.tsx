@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, CalendarDays, HeartHandshake, MapPin, Plus, Share2 } from 'lucide-react';
+import { BookOpen, CalendarDays, HeartHandshake, MapPin, Plus, Users } from 'lucide-react';
 
 export type ActiveTab = 'map' | 'itinerary' | 'diary' | 'wishlist';
 
@@ -8,7 +8,7 @@ interface TopBarProps {
   activeTab: ActiveTab;
   onSelectTab: (tab: ActiveTab) => void;
   onOpenQuickAdd: () => void;
-  onOpenFamilyShare: () => void;
+  onOpenFamilyModal: () => void;
   canEdit: boolean;
 }
 
@@ -17,14 +17,14 @@ export const TopBar: React.FC<TopBarProps> = ({
   activeTab,
   onSelectTab,
   onOpenQuickAdd,
-  onOpenFamilyShare,
+  onOpenFamilyModal,
   canEdit,
 }) => {
   const navItems: { id: ActiveTab; label: string; mobileLabel: string; icon: React.ReactNode }[] = [
     { id: 'map', label: '지도 · 실시간 위치', mobileLabel: '실시간 지도', icon: <MapPin className="w-5 h-5" /> },
     { id: 'itinerary', label: '공유 일정표', mobileLabel: '일정표', icon: <CalendarDays className="w-5 h-5" /> },
     { id: 'diary', label: '사진 일기장', mobileLabel: '일기장', icon: <BookOpen className="w-5 h-5" /> },
-    { id: 'wishlist', label: '가고 싶은 곳', mobileLabel: '찜 목록', icon: <HeartHandshake className="w-5 h-5" /> },
+    { id: 'wishlist', label: '추천 여행지', mobileLabel: '추천 여행지', icon: <HeartHandshake className="w-5 h-5" /> },
   ];
 
   return (
@@ -41,7 +41,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             {tripTitle || '우리 가족 유럽 여행'}
           </button>
 
-          {/* Zone 2: 4 clean single-line text nav links (hidden on mobile, moved to bottom bar) */}
+          {/* Zone 2: 4 clean single-line text nav links */}
           <nav className="hidden md:flex items-center gap-6">
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
@@ -62,16 +62,16 @@ export const TopBar: React.FC<TopBarProps> = ({
             })}
           </nav>
 
-          {/* Zone 3: Single primary action (with secondary share icon on mobile if needed) */}
+          {/* Zone 3: Family switcher + Primary CTA */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={onOpenFamilyShare}
-              title="가족 초대 코드 및 계정 설정"
+              onClick={onOpenFamilyModal}
+              title="내 역할 변경 및 가족 공유"
               className="min-h-[40px] min-w-[40px] px-3 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
-              <Share2 className="w-4 h-4" />
-              <span className="hidden sm:inline">초대코드</span>
+              <Users className="w-4 h-4" />
+              <span className="hidden sm:inline">내 역할 · 공유</span>
             </button>
 
             {canEdit && (
@@ -88,7 +88,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </header>
 
-      {/* Mobile Bottom Tab Bar (Thumb zone, <= 15% sticky height cap) */}
+      {/* Mobile Bottom Tab Bar */}
       <nav
         aria-label="하단 메뉴"
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-4 h-16"

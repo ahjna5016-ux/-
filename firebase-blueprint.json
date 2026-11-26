@@ -2,10 +2,10 @@
   "entities": {
     "TripRoom": {
       "title": "TripRoom",
-      "description": "Invite-code-gated family Europe trip room accessible without login",
+      "description": "Family Europe trip room (2027-01-14 ~ 2027-01-28) accessible without login or invite code",
       "type": "object",
       "properties": {
-        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9]{6,12}$", "minLength": 6, "maxLength": 12 },
+        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9]{6,16}$", "minLength": 6, "maxLength": 16 },
         "title": { "type": "string", "minLength": 1, "maxLength": 100 },
         "subtitle": { "type": "string", "minLength": 0, "maxLength": 160 },
         "startDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
@@ -21,7 +21,7 @@
       "description": "Per-user reference to created or joined trip rooms",
       "type": "object",
       "properties": {
-        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9]{6,12}$", "maxLength": 12 },
+        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9]{6,16}$", "maxLength": 16 },
         "tripTitle": { "type": "string", "minLength": 1, "maxLength": 100 },
         "role": { "type": "string", "enum": ["owner", "editor", "viewer"] },
         "joinedAt": { "type": "string", "format": "date-time" }

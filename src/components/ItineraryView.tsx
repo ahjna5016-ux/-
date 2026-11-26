@@ -28,6 +28,14 @@ import {
   toggleItineraryLike,
   updateItineraryItem,
 } from '../services/tripService';
+import {
+  formatKoreanMonthDay,
+  getDateForDayIndex,
+  getTripPeriodStatus,
+  TRIP_TOTAL_DAYS,
+} from '../utils/tripDates';
+import { getCountryAndCityInfo } from '../utils/europeLocations';
+import { CityLandmarkBadge, CountryFlagIcon } from './EuropeLocationVisuals';
 import { PlaceAutocompleteInput } from './PlaceAutocompleteInput';
 
 interface ItineraryViewProps {
@@ -35,7 +43,6 @@ interface ItineraryViewProps {
   actorName: string;
   activeProfileSlot: ProfileSlot;
   canEdit: boolean;
-  isOwner: boolean;
   travelers: Traveler[];
   itinerary: ItineraryItem[];
   onFocusOnMap: (lat: number, lng: number, title: string) => void;
@@ -47,13 +54,16 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   actorName,
   activeProfileSlot,
   canEdit,
-  isOwner,
   travelers,
   itinerary,
   onFocusOnMap,
   onCreateDiaryFromSpot,
 }) => {
-  const currentTravelerId = activeProfileSlot !== 'brother_home' ? activeProfileSlot : 'me';
+  const currentTravelerId = activeProfileSlot !== 'other_family' ? activeProfileSlot : 'me';
+  const period = useMemo(
+    () => getTripPeriodStatus(trip.startDate, trip.endDate),
+    [trip.startDate, trip.endDate]
+  );
 
   const [selectedDay, setSelectedDay] = useState<number | 'all'>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
@@ -78,8 +88,9 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
 
   const dayNumbers = useMemo(() => {
-    const unique = Array.from(new Set(itinerary.map((i) => i.dayIndex))).sort((a, b) => a - b);
-    return unique.length > 0 ? unique : [1, 2, 3, 4];
+    const baseDays = Array.from({ length: TRIP_TOTAL_DAYS }, (_, idx) => idx + 1);
+    const extraDays = itinerary.map((i) => i.dayIndex).filter((d) => d > TRIP_TOTAL_DAYS);
+    return Array.from(new Set([...baseDays, ...extraDays])).sort((a, b) => a - b);
   }, [itinerary]);
 
   const filteredItems = useMemo(() => {
@@ -101,15 +112,11 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   const openAddModal = () => {
     setEditingItem(null);
     const defaultDay = selectedDay === 'all' ? 1 : selectedDay;
-    const baseDate = new Date(trip.startDate);
-    baseDate.setDate(baseDate.getDate() + (defaultDay - 1));
-    const dateStr = baseDate.toISOString().slice(0, 10);
-
     setDayIndex(defaultDay);
-    setDate(dateStr);
+    setDate(getDateForDayIndex(trip.startDate, defaultDay));
     setStartTime('10:00');
     setEndTime('12:00');
-    setCity('파리');
+    setCity(defaultDay <= 5 ? '파리' : defaultDay <= 9 ? '인터라켄' : defaultDay <= 11 ? '피렌체' : '로마');
     setTitle('');
     setCategory('landmark');
     setPlaceId('');
@@ -155,10 +162,11 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     setIsSaving(true);
     try {
       const updaterName = actorName || '가족';
+      const syncedDate = getDateForDayIndex(trip.startDate, dayIndex);
       if (editingItem) {
         await updateItineraryItem(trip.inviteCode, editingItem.id, updaterName, {
           dayIndex,
-          date,
+          date: syncedDate,
           startTime,
           endTime,
           city,
@@ -175,7 +183,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
       } else {
         await addItineraryItem(trip.inviteCode, updaterName, {
           dayIndex,
-          date,
+          date: syncedDate,
           startTime,
           endTime,
           city,
@@ -205,11 +213,20 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     });
   };
 
+  const formatDayChip = (d: number) => {
+    const dateLabel = formatKoreanMonthDay(getDateForDayIndex(trip.startDate, d));
+    if (period.currentDayIndex === d) return `${d}일차 (${dateLabel}) · 오늘`;
+    return `${d}일차 (${dateLabel})`;
+  };
+
   return (
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-10">
       {/* Header & Primary Action */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 pb-5 border-b border-slate-200">
         <div>
+          <div className="text-xs font-semibold text-blue-700 font-mono-tabular mb-1">
+            2027.01.14(목) ~ 2027.01.28(목) · 14박 15일
+          </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">가족 공유 유럽 일정표</h1>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
             초5·초6 아이취향 {kidSpotsCount}곳 · 어른감성 {adultSpotsCount}곳 · 도보 여유{' '}
@@ -243,20 +260,32 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
           전체 일정 ({itinerary.length})
         </button>
         {dayNumbers.map((d) => {
-          const dayLabel = d === 1 ? '1일차 (오늘)' : d === 2 ? '2일차 (내일)' : `${d}일차`;
-          const count = itinerary.filter((i) => i.dayIndex === d).length;
+          const dayItems = itinerary.filter((i) => i.dayIndex === d);
+          const count = dayItems.length;
+          const dayCountry = dayItems[0]
+            ? getCountryAndCityInfo(dayItems[0].city, dayItems[0].address)
+            : null;
           return (
             <button
               key={d}
               type="button"
               onClick={() => setSelectedDay(d)}
-              className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+              className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 font-mono-tabular flex items-center gap-1.5 ${
                 selectedDay === d
                   ? 'bg-slate-900 text-white'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              {dayLabel} · {count}
+              {dayCountry && (
+                <CountryFlagIcon
+                  code={dayCountry.countryCode}
+                  className="w-[16px] h-[11px]"
+                  label={dayCountry.country}
+                />
+              )}
+              <span>
+                {formatDayChip(d)} · {count}
+              </span>
             </button>
           );
         })}
@@ -323,6 +352,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
             const likedNames = item.likedBy
               .map((id) => travelers.find((t) => t.id === id)?.avatarInitial || id)
               .join(', ');
+            const locationInfo = getCountryAndCityInfo(item.city, item.address);
 
             return (
               <div
@@ -332,18 +362,23 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-mono-tabular mb-1.5">
                     <span className="font-semibold text-blue-700">
-                      {item.dayIndex === 1
-                        ? '1일차 · 오늘'
-                        : item.dayIndex === 2
-                        ? '2일차 · 내일'
-                        : `${item.dayIndex}일차`}
+                      {formatDayChip(item.dayIndex)}
                     </span>
                     <span aria-hidden="true">·</span>
                     <span>
                       {item.startTime} - {item.endTime}
                     </span>
                     <span aria-hidden="true">·</span>
-                    <span>{item.city}</span>
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 font-semibold font-sans">
+                      <CountryFlagIcon
+                        code={locationInfo.countryCode}
+                        className="w-[17px] h-[12px]"
+                        label={locationInfo.country}
+                      />
+                      <span>{locationInfo.country}</span>
+                      <span className="text-slate-400">·</span>
+                      <span>{locationInfo.city}</span>
+                    </span>
                     <span aria-hidden="true">·</span>
                     <span>{CATEGORY_LABELS[item.category]}</span>
                     <span aria-hidden="true">·</span>
@@ -356,7 +391,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                       onClick={() => void cycleStatus(item)}
                       disabled={!canEdit}
                       title="방문 상태 변경 (예정 / 완료 / 건너뜀)"
-                      className={`mt-0.5 min-h-[28px] min-w-[28px] rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+                      className={`mt-1.5 min-h-[28px] min-w-[28px] rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                         item.status === 'visited'
                           ? 'bg-emerald-600 border-emerald-600 text-white'
                           : item.status === 'skipped'
@@ -366,6 +401,12 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                     >
                       <Check className="w-4 h-4" />
                     </button>
+
+                    <CityLandmarkBadge
+                      theme={locationInfo.cityTheme}
+                      countryCode={locationInfo.countryCode}
+                      city={locationInfo.city}
+                    />
 
                     <div className="min-w-0 flex-1">
                       <h3
@@ -441,16 +482,14 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      {isOwner && (
-                        <button
-                          type="button"
-                          onClick={() => void deleteItineraryItem(trip.inviteCode, item.id)}
-                          title="일정 삭제"
-                          className="min-h-[40px] min-w-[40px] p-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-red-600 hover:border-red-200 flex items-center justify-center"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => void deleteItineraryItem(trip.inviteCode, item.id)}
+                        title="일정 삭제"
+                        className="min-h-[40px] min-w-[40px] p-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-red-600 hover:border-red-200 flex items-center justify-center"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </>
                   )}
                 </div>
@@ -501,18 +540,27 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">일차</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={30}
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">일차 (날짜)</label>
+                  <select
                     value={dayIndex}
-                    onChange={(e) => setDayIndex(Number(e.target.value) || 1)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl min-h-[44px] font-mono-tabular"
-                  />
+                    onChange={(e) => {
+                      const next = Number(e.target.value) || 1;
+                      setDayIndex(next);
+                      setDate(getDateForDayIndex(trip.startDate, next));
+                    }}
+                    className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-xl min-h-[44px] bg-white font-mono-tabular"
+                  >
+                    {Array.from({ length: TRIP_TOTAL_DAYS }, (_, idx) => idx + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {d}일차 ({formatKoreanMonthDay(getDateForDayIndex(trip.startDate, d))})
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">도시</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    도시 (나라 자동 표시)
+                  </label>
                   <input
                     type="text"
                     value={city}
@@ -521,6 +569,23 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                     required
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl min-h-[44px]"
                   />
+                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+                    {(() => {
+                      const info = getCountryAndCityInfo(city, address);
+                      return (
+                        <>
+                          <CountryFlagIcon
+                            code={info.countryCode}
+                            className="w-[15px] h-[11px]"
+                            label={info.country}
+                          />
+                          <span>
+                            {info.country} · {info.city}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -641,6 +706,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                   {isSaving ? '저장 중...' : editingItem ? '수정 완료' : '일정에 저장'}
                 </button>
               </div>
+              <input type="hidden" value={date} />
             </form>
           </div>
         </div>
