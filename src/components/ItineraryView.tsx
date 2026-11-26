@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
+  CalendarDays,
   Camera,
   Check,
   Clock,
   Heart,
+  List,
   MapPin,
   Pencil,
   Plus,
@@ -36,6 +38,7 @@ import {
 } from '../utils/tripDates';
 import { getCountryAndCityInfo } from '../utils/europeLocations';
 import { CityLandmarkBadge, CountryFlagIcon } from './EuropeLocationVisuals';
+import { MonthlyCalendarView } from './MonthlyCalendarView';
 import { PlaceAutocompleteInput } from './PlaceAutocompleteInput';
 
 interface ItineraryViewProps {
@@ -65,7 +68,11 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     [trip.startDate, trip.endDate]
   );
 
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [selectedDay, setSelectedDay] = useState<number | 'all'>('all');
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<number>(
+    () => period.currentDayIndex ?? 1
+  );
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
@@ -93,13 +100,20 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     return Array.from(new Set([...baseDays, ...extraDays])).sort((a, b) => a - b);
   }, [itinerary]);
 
-  const filteredItems = useMemo(() => {
+  const tagFilteredItems = useMemo(() => {
     return itinerary.filter((item) => {
-      if (selectedDay !== 'all' && item.dayIndex !== selectedDay) return false;
       if (selectedTag !== 'all' && !item.tags.includes(selectedTag)) return false;
       return true;
     });
-  }, [itinerary, selectedDay, selectedTag]);
+  }, [itinerary, selectedTag]);
+
+  const filteredItems = useMemo(() => {
+    const activeDay = viewMode === 'calendar' ? selectedCalendarDay : selectedDay;
+    return tagFilteredItems.filter((item) => {
+      if (activeDay !== 'all' && item.dayIndex !== activeDay) return false;
+      return true;
+    });
+  }, [tagFilteredItems, viewMode, selectedCalendarDay, selectedDay]);
 
   const kidSpotsCount = filteredItems.filter(
     (i) => i.tags.includes('아이취향') || i.tags.includes('모두만족')
@@ -109,9 +123,10 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   ).length;
   const easyWalkCount = filteredItems.filter((i) => i.walkingLevel === 'low').length;
 
-  const openAddModal = () => {
+  const openAddModal = (overrideDay?: number) => {
     setEditingItem(null);
-    const defaultDay = selectedDay === 'all' ? 1 : selectedDay;
+    const fallbackDay = viewMode === 'calendar' ? selectedCalendarDay : selectedDay === 'all' ? 1 : selectedDay;
+    const defaultDay = overrideDay ?? fallbackDay;
     setDayIndex(defaultDay);
     setDate(getDateForDayIndex(trip.startDate, defaultDay));
     setStartTime('10:00');
@@ -234,62 +249,94 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
           </p>
         </div>
 
-        {canEdit && (
-          <button
-            type="button"
-            onClick={openAddModal}
-            className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            새 일정 장소 추가
-          </button>
-        )}
-      </div>
-
-      {/* Day Selector Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-4">
-        <button
-          type="button"
-          onClick={() => setSelectedDay('all')}
-          className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-            selectedDay === 'all'
-              ? 'bg-slate-900 text-white'
-              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-          }`}
-        >
-          전체 일정 ({itinerary.length})
-        </button>
-        {dayNumbers.map((d) => {
-          const dayItems = itinerary.filter((i) => i.dayIndex === d);
-          const count = dayItems.length;
-          const dayCountry = dayItems[0]
-            ? getCountryAndCityInfo(dayItems[0].city, dayItems[0].address)
-            : null;
-          return (
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {/* View Mode Segmented Switch */}
+          <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
-              key={d}
               type="button"
-              onClick={() => setSelectedDay(d)}
-              className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 font-mono-tabular flex items-center gap-1.5 ${
-                selectedDay === d
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              onClick={() => setViewMode('list')}
+              className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                viewMode === 'list'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {dayCountry && (
-                <CountryFlagIcon
-                  code={dayCountry.countryCode}
-                  className="w-[16px] h-[11px]"
-                  label={dayCountry.country}
-                />
-              )}
-              <span>
-                {formatDayChip(d)} · {count}
-              </span>
+              <List className="w-3.5 h-3.5" />
+              목록 보기
             </button>
-          );
-        })}
+            <button
+              type="button"
+              onClick={() => setViewMode('calendar')}
+              className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                viewMode === 'calendar'
+                  ? 'bg-blue-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CalendarDays className="w-3.5 h-3.5" />
+              월간 달력 (1월)
+            </button>
+          </div>
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => openAddModal()}
+              className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              새 일정 장소 추가
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Day Selector Tabs (shown in list mode) */}
+      {viewMode === 'list' && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-4">
+          <button
+            type="button"
+            onClick={() => setSelectedDay('all')}
+            className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+              selectedDay === 'all'
+                ? 'bg-slate-900 text-white'
+                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            전체 일정 ({itinerary.length})
+          </button>
+          {dayNumbers.map((d) => {
+            const dayItems = itinerary.filter((i) => i.dayIndex === d);
+            const count = dayItems.length;
+            const dayCountry = dayItems[0]
+              ? getCountryAndCityInfo(dayItems[0].city, dayItems[0].address)
+              : null;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setSelectedDay(d)}
+                className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 font-mono-tabular flex items-center gap-1.5 ${
+                  selectedDay === d
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {dayCountry && (
+                  <CountryFlagIcon
+                    code={dayCountry.countryCode}
+                    className="w-[16px] h-[11px]"
+                    label={dayCountry.country}
+                  />
+                )}
+                <span>
+                  {formatDayChip(d)} · {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Kid & Adult Recommendation Tag Filters */}
       <div className="bg-white border border-slate-200 rounded-2xl p-3.5 mb-6">
@@ -326,6 +373,23 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
         </div>
       </div>
 
+      {/* Monthly Calendar Grid (January 2027) */}
+      {viewMode === 'calendar' && (
+        <div className="mb-4">
+          <MonthlyCalendarView
+            startDate={trip.startDate}
+            itinerary={itinerary}
+            filteredItinerary={tagFilteredItems}
+            selectedDay={selectedCalendarDay}
+            currentDayIndex={period.currentDayIndex}
+            selectedTag={selectedTag}
+            canEdit={canEdit}
+            onSelectDay={(d) => setSelectedCalendarDay(d)}
+            onAddForDay={(d) => openAddModal(d)}
+          />
+        </div>
+      )}
+
       {/* Itinerary List */}
       {filteredItems.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
@@ -338,7 +402,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
           {canEdit && (
             <button
               type="button"
-              onClick={openAddModal}
+              onClick={() => openAddModal()}
               className="min-h-[44px] px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
             >
               일정 추가하기

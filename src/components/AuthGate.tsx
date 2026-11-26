@@ -12,15 +12,19 @@ import { DEFAULT_FAMILY_TRIP_ID, ensureDefaultFamilyTripRoom } from '../services
 
 interface AuthGateProps {
   initialError?: string | null;
+  initialProfileSlot?: ProfileSlot;
+  initialDisplayName?: string;
   onEnterFamilyRoom: (session: GuestSession) => void;
 }
 
 export const AuthGate: React.FC<AuthGateProps> = ({
   initialError = null,
+  initialProfileSlot = 'me',
+  initialDisplayName = '',
   onEnterFamilyRoom,
 }) => {
-  const [selectedSlot, setSelectedSlot] = useState<ProfileSlot>('me');
-  const [displayName, setDisplayName] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState<ProfileSlot>(initialProfileSlot);
+  const [displayName, setDisplayName] = useState(initialDisplayName);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(initialError);
   const [imgFailed, setImgFailed] = useState(false);

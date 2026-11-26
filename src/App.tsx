@@ -30,47 +30,44 @@ import { DiaryPrefill, DiaryView } from './components/DiaryView';
 import { WishlistView } from './components/WishlistView';
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
-const FAMILY_SESSION_STORAGE_KEY = 'europe_2027_family_session';
+const LAST_PROFILE_STORAGE_KEY = 'europe_2027_last_profile';
 
-function loadStoredSession(): GuestSession | null {
+interface LastProfilePreference {
+  profileSlot: ProfileSlot;
+  displayName: string;
+}
+
+function loadLastProfilePreference(): LastProfilePreference {
   try {
-    const raw = window.localStorage.getItem(FAMILY_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<GuestSession>;
-    if (
-      parsed.tripId === DEFAULT_FAMILY_TRIP_ID &&
-      typeof parsed.displayName === 'string' &&
-      typeof parsed.profileSlot === 'string'
-    ) {
-      const validSlot = PROFILE_SLOT_OPTIONS.some((o) => o.id === parsed.profileSlot);
-      return {
-        tripId: DEFAULT_FAMILY_TRIP_ID,
-        displayName: parsed.displayName,
-        profileSlot: validSlot ? (parsed.profileSlot as ProfileSlot) : 'other_family',
-      };
-    }
-    return null;
+    const raw = window.localStorage.getItem(LAST_PROFILE_STORAGE_KEY);
+    if (!raw) return { profileSlot: 'me', displayName: '' };
+    const parsed = JSON.parse(raw) as Partial<LastProfilePreference>;
+    const validSlot = PROFILE_SLOT_OPTIONS.some((o) => o.id === parsed.profileSlot);
+    return {
+      profileSlot: validSlot ? (parsed.profileSlot as ProfileSlot) : 'me',
+      displayName: typeof parsed.displayName === 'string' ? parsed.displayName : '',
+    };
   } catch {
-    return null;
+    return { profileSlot: 'me', displayName: '' };
   }
 }
 
-function saveStoredSession(session: GuestSession | null): void {
+function saveLastProfilePreference(pref: LastProfilePreference): void {
   try {
-    if (!session) {
-      window.localStorage.removeItem(FAMILY_SESSION_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(FAMILY_SESSION_STORAGE_KEY, JSON.stringify(session));
-    }
+    window.localStorage.setItem(LAST_PROFILE_STORAGE_KEY, JSON.stringify(pref));
   } catch {
     // Ignore storage errors
   }
 }
 
 function TravelWorkspace() {
-  const [session, setSession] = useState<GuestSession | null>(() => loadStoredSession());
+  const [lastPref, setLastPref] = useState<LastProfilePreference>(() =>
+    loadLastProfilePreference()
+  );
+  // Always show the first screen on app entry so the user picks who they are before entering
+  const [session, setSession] = useState<GuestSession | null>(null);
   const [trip, setTrip] = useState<TripRoom | null>(null);
-  const [tripReady, setTripReady] = useState(false);
+  const [tripReady, setTripReady] = useState(true);
   const [roomError, setRoomError] = useState<string | null>(null);
 
   const [travelers, setTravelers] = useState<Traveler[]>([]);
@@ -121,7 +118,6 @@ function TravelWorkspace() {
       .catch((err) => {
         if (!cancelled) {
           setRoomError(err instanceof Error ? err.message : '여행 정보를 불러오지 못했습니다.');
-          saveStoredSession(null);
           setSession(null);
           setTripReady(true);
         }
@@ -156,7 +152,16 @@ function TravelWorkspace() {
   };
 
   const handleEnterFamilyRoom = (nextSession: GuestSession) => {
-    saveStoredSession(nextSession);
+    const slotDefaultLabel =
+      PROFILE_SLOT_OPTIONS.find((s) => s.id === nextSession.profileSlot)?.label || '';
+    const customName =
+      nextSession.displayName !== slotDefaultLabel ? nextSession.displayName : '';
+    const nextPref: LastProfilePreference = {
+      profileSlot: nextSession.profileSlot,
+      displayName: customName,
+    };
+    saveLastProfilePreference(nextPref);
+    setLastPref(nextPref);
     setRoomError(null);
     setSession(nextSession);
   };
@@ -168,12 +173,13 @@ function TravelWorkspace() {
       displayName: option?.label || session?.displayName || '가족',
       profileSlot: slot,
     };
-    saveStoredSession(nextSession);
+    const nextPref: LastProfilePreference = { profileSlot: slot, displayName: '' };
+    saveLastProfilePreference(nextPref);
+    setLastPref(nextPref);
     setSession(nextSession);
   };
 
   const handleResetToRolePicker = () => {
-    saveStoredSession(null);
     setSession(null);
     setTrip(null);
     setIsFamilyModalOpen(false);
@@ -234,7 +240,12 @@ function TravelWorkspace() {
           </div>
         </div>
       ) : !session || !trip ? (
-        <AuthGate initialError={roomError} onEnterFamilyRoom={handleEnterFamilyRoom} />
+        <AuthGate
+          initialError={roomError}
+          initialProfileSlot={lastPref.profileSlot}
+          initialDisplayName={lastPref.displayName}
+          onEnterFamilyRoom={handleEnterFamilyRoom}
+        />
       ) : (
         <>
           <TopBar
