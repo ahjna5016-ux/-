@@ -1,0 +1,313 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Hardened Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidInviteCode(code) {
+      return code is string && code.size() >= 6 && code.size() <= 12 && code.matches('^[A-Z0-9]+$');
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isValidTimeStr(t) {
+      return t is string && t.size() == 5 && t.matches('^\\d{2}:\\d{2}$');
+    }
+
+    function isStringListBounded(arr, maxLen) {
+      return arr is list && arr.size() <= maxLen && (arr.size() == 0 || arr[0] is string);
+    }
+
+    function isRoomOwner(inviteCode) {
+      return isVerified()
+        && exists(/databases/$(database)/documents/tripRooms/$(inviteCode))
+        && get(/databases/$(database)/documents/tripRooms/$(inviteCode)).data.ownerId == request.auth.uid;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidTripRoom(data, code) {
+      return data.keys().hasAll([
+          'inviteCode', 'title', 'subtitle', 'startDate', 'endDate', 'ownerId', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'inviteCode', 'title', 'subtitle', 'startDate', 'endDate', 'ownerId', 'createdAt', 'updatedAt'
+        ])
+        && data.inviteCode == code
+        && isValidInviteCode(data.inviteCode)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.subtitle is string && data.subtitle.size() <= 160
+        && isValidDateStr(data.startDate)
+        && isValidDateStr(data.endDate)
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidJoinedTrip(data, code) {
+      return data.keys().hasAll(['inviteCode', 'tripTitle', 'role', 'joinedAt'])
+        && data.keys().hasOnly(['inviteCode', 'tripTitle', 'role', 'joinedAt'])
+        && data.inviteCode == code
+        && isValidInviteCode(data.inviteCode)
+        && data.tripTitle is string && data.tripTitle.size() >= 1 && data.tripTitle.size() <= 100
+        && data.role in ['owner', 'editor', 'viewer']
+        && data.joinedAt is timestamp;
+    }
+
+    function isValidTraveler(data, travelerId) {
+      return data.keys().hasAll([
+          'id', 'name', 'relation', 'ageGroup', 'markerColor', 'avatarInitial',
+          'isSharingLocation', 'lat', 'lng', 'accuracyMeters',
+          'currentPlaceLabel', 'statusNote', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'name', 'relation', 'ageGroup', 'markerColor', 'avatarInitial',
+          'isSharingLocation', 'lat', 'lng', 'accuracyMeters',
+          'currentPlaceLabel', 'statusNote', 'updatedAt'
+        ])
+        && data.id == travelerId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 40
+        && data.relation is string && data.relation.size() >= 1 && data.relation.size() <= 40
+        && data.ageGroup in ['kid', 'adult', 'senior']
+        && data.markerColor is string && data.markerColor.size() == 7 && data.markerColor.matches('^#[0-9A-Fa-f]{6}$')
+        && data.avatarInitial is string && data.avatarInitial.size() >= 1 && data.avatarInitial.size() <= 4
+        && data.isSharingLocation is bool
+        && data.lat is number && data.lat >= -90 && data.lat <= 90
+        && data.lng is number && data.lng >= -180 && data.lng <= 180
+        && data.accuracyMeters is number && data.accuracyMeters >= 0 && data.accuracyMeters <= 50000
+        && data.currentPlaceLabel is string && data.currentPlaceLabel.size() <= 100
+        && data.statusNote is string && data.statusNote.size() <= 80
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidItineraryItem(data, itemId) {
+      return data.keys().hasAll([
+          'id', 'dayIndex', 'date', 'startTime', 'endTime', 'city', 'title',
+          'category', 'placeId', 'address', 'lat', 'lng', 'tags', 'walkingLevel',
+          'memo', 'status', 'likedBy', 'updatedByName', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'dayIndex', 'date', 'startTime', 'endTime', 'city', 'title',
+          'category', 'placeId', 'address', 'lat', 'lng', 'tags', 'walkingLevel',
+          'memo', 'status', 'likedBy', 'updatedByName', 'createdAt', 'updatedAt'
+        ])
+        && data.id == itemId
+        && data.dayIndex is number && data.dayIndex >= 1 && data.dayIndex <= 30
+        && isValidDateStr(data.date)
+        && isValidTimeStr(data.startTime)
+        && isValidTimeStr(data.endTime)
+        && data.city is string && data.city.size() >= 1 && data.city.size() <= 50
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.category in ['landmark', 'food', 'cafe', 'museum', 'activity', 'shopping', 'transit', 'lodging']
+        && data.placeId is string && data.placeId.size() <= 160
+        && data.address is string && data.address.size() <= 200
+        && data.lat is number && data.lat >= -90 && data.lat <= 90
+        && data.lng is number && data.lng >= -180 && data.lng <= 180
+        && isStringListBounded(data.tags, 8)
+        && data.walkingLevel in ['low', 'medium', 'high']
+        && data.memo is string && data.memo.size() <= 400
+        && data.status in ['planned', 'visited', 'skipped']
+        && isStringListBounded(data.likedBy, 10)
+        && data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 60
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDiaryEntry(data, entryId) {
+      return data.keys().hasAll([
+          'id', 'dayIndex', 'date', 'timeLabel', 'city', 'placeName',
+          'mealOrActivity', 'entryType', 'story', 'photoUrl', 'lat', 'lng',
+          'withTravelers', 'tags', 'authorName', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'dayIndex', 'date', 'timeLabel', 'city', 'placeName',
+          'mealOrActivity', 'entryType', 'story', 'photoUrl', 'lat', 'lng',
+          'withTravelers', 'tags', 'authorName', 'createdAt', 'updatedAt'
+        ])
+        && data.id == entryId
+        && data.dayIndex is number && data.dayIndex >= 1 && data.dayIndex <= 30
+        && isValidDateStr(data.date)
+        && isValidTimeStr(data.timeLabel)
+        && data.city is string && data.city.size() >= 1 && data.city.size() <= 50
+        && data.placeName is string && data.placeName.size() >= 1 && data.placeName.size() <= 100
+        && data.mealOrActivity is string && data.mealOrActivity.size() >= 1 && data.mealOrActivity.size() <= 120
+        && data.entryType in ['meal', 'spot', 'moment']
+        && data.story is string && data.story.size() >= 1 && data.story.size() <= 800
+        && data.photoUrl is string && data.photoUrl.size() <= 250000
+        && data.lat is number && data.lat >= -90 && data.lat <= 90
+        && data.lng is number && data.lng >= -180 && data.lng <= 180
+        && isStringListBounded(data.withTravelers, 10)
+        && isStringListBounded(data.tags, 8)
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 60
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWishlistPlace(data, placeId) {
+      return data.keys().hasAll([
+          'id', 'city', 'placeName', 'googlePlaceId', 'address', 'lat', 'lng',
+          'category', 'tags', 'reason', 'suggestedBy', 'votedBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'city', 'placeName', 'googlePlaceId', 'address', 'lat', 'lng',
+          'category', 'tags', 'reason', 'suggestedBy', 'votedBy', 'createdAt', 'updatedAt'
+        ])
+        && data.id == placeId
+        && data.city is string && data.city.size() >= 1 && data.city.size() <= 50
+        && data.placeName is string && data.placeName.size() >= 1 && data.placeName.size() <= 100
+        && data.googlePlaceId is string && data.googlePlaceId.size() <= 160
+        && data.address is string && data.address.size() <= 200
+        && data.lat is number && data.lat >= -90 && data.lat <= 90
+        && data.lng is number && data.lng >= -180 && data.lng <= 180
+        && data.category in ['landmark', 'food', 'cafe', 'museum', 'activity', 'shopping']
+        && isStringListBounded(data.tags, 8)
+        && data.reason is string && data.reason.size() <= 300
+        && data.suggestedBy is string && data.suggestedBy.size() >= 1 && data.suggestedBy.size() <= 40
+        && isStringListBounded(data.votedBy, 10)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. User's private saved trip rooms
+    match /users/{userId}/joinedTrips/{inviteCode} {
+      allow get: if isSignedIn() && isValidId(userId) && isValidInviteCode(inviteCode) && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isVerified() && isValidId(userId) && isValidInviteCode(inviteCode)
+        && request.auth.uid == userId
+        && isValidJoinedTrip(incoming(), inviteCode)
+        && incoming().joinedAt == request.time;
+      allow update: if isVerified() && isValidId(userId) && isValidInviteCode(inviteCode)
+        && request.auth.uid == userId
+        && isValidJoinedTrip(incoming(), inviteCode)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['tripTitle', 'role']);
+      allow delete: if isVerified() && isValidId(userId) && isValidInviteCode(inviteCode) && request.auth.uid == userId;
+    }
+
+    // 2. Invite-code-keyed Family Trip Rooms (No list allowed; exact inviteCode required in path)
+    match /tripRooms/{inviteCode} {
+      allow get: if isValidInviteCode(inviteCode);
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerified() && isValidInviteCode(inviteCode)
+        && isValidTripRoom(incoming(), inviteCode)
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidInviteCode(inviteCode)
+        && existing().ownerId == request.auth.uid
+        && isValidTripRoom(incoming(), inviteCode)
+        && incoming().ownerId == existing().ownerId
+        && incoming().inviteCode == existing().inviteCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'subtitle', 'startDate', 'endDate', 'updatedAt']);
+      allow delete: if isVerified() && isValidInviteCode(inviteCode) && existing().ownerId == request.auth.uid;
+
+      // 3. Six Travelers & Real-Time Location (Accessible & updatable by invite-code holders)
+      match /travelers/{travelerId} {
+        allow get: if isValidInviteCode(inviteCode) && isValidId(travelerId);
+        allow list: if isValidInviteCode(inviteCode);
+        allow create: if isValidInviteCode(inviteCode) && isValidId(travelerId)
+          && isValidTraveler(incoming(), travelerId)
+          && incoming().updatedAt == request.time;
+        allow update: if isValidInviteCode(inviteCode) && isValidId(travelerId)
+          && isValidTraveler(incoming(), travelerId)
+          && incoming().id == existing().id
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'isSharingLocation', 'lat', 'lng', 'accuracyMeters', 'currentPlaceLabel', 'statusNote', 'updatedAt'
+          ]);
+        allow delete: if isRoomOwner(inviteCode) && isValidId(travelerId);
+      }
+
+      // 4. Shared Itinerary Items
+      match /itineraryItems/{itemId} {
+        allow get: if isValidInviteCode(inviteCode) && isValidId(itemId);
+        allow list: if isValidInviteCode(inviteCode);
+        allow create: if isValidInviteCode(inviteCode) && isValidId(itemId)
+          && isValidItineraryItem(incoming(), itemId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidInviteCode(inviteCode) && isValidId(itemId)
+          && isValidItineraryItem(incoming(), itemId)
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'dayIndex', 'date', 'startTime', 'endTime', 'city', 'title',
+            'category', 'placeId', 'address', 'lat', 'lng', 'tags', 'walkingLevel',
+            'memo', 'status', 'likedBy', 'updatedByName', 'updatedAt'
+          ]);
+        allow delete: if isRoomOwner(inviteCode) && isValidId(itemId);
+      }
+
+      // 5. Photo Travel Diary Entries
+      match /diaryEntries/{entryId} {
+        allow get: if isValidInviteCode(inviteCode) && isValidId(entryId);
+        allow list: if isValidInviteCode(inviteCode);
+        allow create: if isValidInviteCode(inviteCode) && isValidId(entryId)
+          && isValidDiaryEntry(incoming(), entryId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidInviteCode(inviteCode) && isValidId(entryId)
+          && isValidDiaryEntry(incoming(), entryId)
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'dayIndex', 'date', 'timeLabel', 'city', 'placeName',
+            'mealOrActivity', 'entryType', 'story', 'photoUrl', 'lat', 'lng',
+            'withTravelers', 'tags', 'updatedAt'
+          ]);
+        allow delete: if isRoomOwner(inviteCode) && isValidId(entryId);
+      }
+
+      // 6. Wishlist Places & Family Votes
+      match /wishlistPlaces/{placeId} {
+        allow get: if isValidInviteCode(inviteCode) && isValidId(placeId);
+        allow list: if isValidInviteCode(inviteCode);
+        allow create: if isValidInviteCode(inviteCode) && isValidId(placeId)
+          && isValidWishlistPlace(incoming(), placeId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidInviteCode(inviteCode) && isValidId(placeId)
+          && isValidWishlistPlace(incoming(), placeId)
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'city', 'placeName', 'googlePlaceId', 'address', 'lat', 'lng',
+            'category', 'tags', 'reason', 'votedBy', 'updatedAt'
+          ]);
+        allow delete: if isRoomOwner(inviteCode) && isValidId(placeId);
+      }
+    }
+  }
+}

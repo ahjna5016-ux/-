@@ -1,0 +1,6 @@
+{
+  "name": "우리 가족 유럽 여행 · 일정표 & 실시간 위치",
+  "description": "6명의 가족이 함께 일정을 짜고 실시간 위치를 확인하며, 사진 일기장으로 오늘 먹은 것과 내일 일정을 공유하는 유럽 가족 여행 앱입니다.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
